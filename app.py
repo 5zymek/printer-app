@@ -41,7 +41,6 @@ def show_list_view():
     """Displays the main list of jobs with search and filtering."""
     st.title("Printer Job Dashboard")
 
-    # --- Sidebar for Navigation and Filtering ---
     with st.sidebar:
         st.header("Navigation")
         if st.button("Job Dashboard"):
@@ -49,7 +48,7 @@ def show_list_view():
             st.rerun()
         if st.button("Add New Job"):
             st.session_state.page = 'add_new'
-            st.session_state.editing_job_id = None  # Clear any previous edit
+            st.session_state.editing_job_id = None
             st.rerun()
         if st.button("Bulk File Upload"):
             st.session_state.page = 'bulk_upload'
@@ -60,7 +59,6 @@ def show_list_view():
         selected_faculties = st.multiselect("Filter by Faculty", options=FACULTIES)
         selected_statuses = st.multiselect("Filter by Status", options=[s.value for s in JobStatus])
 
-    # Fetch and display jobs
     jobs = database.search_jobs(query=search_query, faculties=selected_faculties, statuses=selected_statuses)
 
     col_headers = st.columns((1, 2, 1, 2, 1, 2))
@@ -85,8 +83,7 @@ def show_bulk_upload_view():
     """A dedicated page for uploading multiple STL files to a faculty's library."""
     st.title("Bulk File Upload to Library")
 
-    st.info(
-        "Here you can upload many STL files at once and assign them to a faculty. These files will then be available when creating a new job.")
+    st.info("Here you can upload many STL files at once and assign them to a faculty.")
 
     selected_faculty = st.selectbox("Select Faculty to upload files for:", FACULTIES)
 
@@ -113,7 +110,7 @@ def show_bulk_upload_view():
 
 
 def show_add_or_edit_view(job_id=None):
-    """View for adding or editing a job, now with library selection AND status editing."""
+    """View for adding or editing a job, with library selection and status editing."""
     is_edit_mode = job_id is not None
 
     if is_edit_mode:
@@ -122,9 +119,9 @@ def show_add_or_edit_view(job_id=None):
             st.error("Job not found!");
             st.session_state.page = 'list';
             st.rerun()
+            return  # Stop execution if job is not found
         page_title = f"Editing Job ID: {job.job_id}"
     else:
-        # For new jobs, default to Pending. The form will reflect this.
         job = Job(user_name="", printer_id=1, faculty=FACULTIES[0], elements=[], status=JobStatus.PENDING)
         page_title = "DRUKARKA NR 1 ADD NEW"
 
@@ -133,20 +130,19 @@ def show_add_or_edit_view(job_id=None):
     with st.form(key="job_form"):
         user_name = st.text_input("User Name", value=job.user_name)
 
-        # We'll put all the selects in columns for a cleaner layout
         col1, col2, col3 = st.columns(3)
         with col1:
             printer_id = st.selectbox("Select Printer ID", options=list(range(1, 9)), index=job.printer_id - 1)
         with col2:
             faculty = st.selectbox("Select Faculty", options=FACULTIES,
                                    index=FACULTIES.index(job.faculty) if job.faculty in FACULTIES else 0)
-
-        # --- NEW ---: Add the status editor here
         with col3:
             status_options = [s.value for s in JobStatus]
-            current_status_index = status_options.index(job.status.value)
+            try:
+                current_status_index = status_options.index(job.status.value)
+            except ValueError:
+                current_status_index = 0  # Default to first status if value is invalid
             status_str = st.selectbox("Job Status", options=status_options, index=current_status_index)
-        # --- END NEW ---
 
         st.markdown("---")
         st.subheader("Select Files for Job")
@@ -154,13 +150,11 @@ def show_add_or_edit_view(job_id=None):
         available_stls = get_stl_files_for_faculty(faculty)
         if not available_stls:
             st.info(f"No files found in the {faculty} library. Use 'Bulk File Upload' to add some.")
-            selected_from_library = []
-        else:
-            selected_from_library = st.multiselect(
-                f"Select from {faculty} Library:",
-                options=available_stls,
-                default=job.elements if is_edit_mode else []
-            )
+        selected_from_library = st.multiselect(
+            f"Select from {faculty} Library:",
+            options=available_stls,
+            default=job.elements if is_edit_mode else []
+        )
 
         uploaded_on_the_fly = st.file_uploader(
             "Or upload new, one-off STL files for this job:",
@@ -184,10 +178,7 @@ def show_add_or_edit_view(job_id=None):
             if not user_name or not final_elements:
                 st.error("User name and at least one STL file are required.")
             else:
-                # --- NEW ---: Update the job's status from the form
                 job.status = JobStatus(status_str)
-                # --- END NEW ---
-
                 job.user_name, job.printer_id, job.faculty, job.elements = user_name, printer_id, faculty, final_elements
                 if is_edit_mode:
                     database.update_job(job);
@@ -204,3 +195,25 @@ def show_add_or_edit_view(job_id=None):
         st.session_state.page = 'list';
         st.session_state.editing_job_id = None;
         st.rerun()
+
+
+# --- Main App Router ---
+# This is the most important part! It tells Streamlit which function to run.
+# If this block is missing, you will see a blank page.
+
+if 'page' in st.session_state:
+    if st.session_state.page == 'list':
+        show_list_view()
+    elif st.session_state.page == 'add_new':
+        show_add_or_edit_view()
+    elif st.session_state.page == 'edit':
+        show_add_or_edit_view(job_id=st.session_state.editing_job_id)
+    elif st.session_state.page == 'bulk_upload':
+        show_bulk_upload_view()
+    else:
+        # Fallback to the list view if the page state is invalid
+        st.session_state.page = 'list'
+        st.rerun()
+else:
+    # Initial run
+    show_list_view()
